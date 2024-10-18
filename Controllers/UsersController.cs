@@ -12,6 +12,7 @@ using System.Text;
 using System.Security.Cryptography;
 using BookApp.Models.ViewModels;
 using BookApp.Models.DTOs;
+using System.Reflection.Metadata;
 
 namespace BookApp.Controllers
 {
@@ -26,28 +27,42 @@ namespace BookApp.Controllers
             _userRepository = userRepository;
         }
 
-        // GET: /Users/Register
         [HttpGet("Register")]
         public IActionResult Register()
         {
             return View();
         }
 
-        // GET: /Users/Login
         [HttpGet("Login")]
         public IActionResult Login()
         {
             return View();
         }
 
-        // GET: /Users/Profile
-        [HttpGet("Profile")]
-        public IActionResult Profile()
+        [HttpGet("Data")]
+        public async Task<ActionResult<UserDTO>> Data()
         {
-            return View();
+            if (HttpContext.Session.GetInt32("UserId") == null)
+            {
+                return BadRequest(new
+                {
+                    message = "Nie jesteś zalogowany."
+                });
+            }
+
+            int userId = (int)HttpContext.Session.GetInt32("UserId");
+            var userDTO = await _userRepository.GetUserWithLoansByIdAsync(userId);
+
+            return Ok(userDTO);
         }
 
-        // POST: /Users/Register
+        [HttpGet("Logout")]
+        public IActionResult Logout()
+        {
+            HttpContext.Session.Clear();
+            return Ok();
+        }
+
         [HttpPost("Register")]
         public async Task<IActionResult> Register(RegisterViewModel model)
         {
@@ -113,28 +128,106 @@ namespace BookApp.Controllers
             return BadRequest();
         }
 
-        [HttpGet("Data")]
-        public async Task<ActionResult<UserDTO>> Data()
+        [HttpPut("ChangePassword")]
+        public async Task<IActionResult> ChangePassword(ChangePasswordModel model)
         {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest();
+            }
+
             if(HttpContext.Session.GetInt32("UserId") == null)
             {
-                return BadRequest(new
+                return Unauthorized(new
                 {
                     message = "Nie jesteś zalogowany."
                 });
             }
 
-            int userId = (int) HttpContext.Session.GetInt32("UserId");
-            var userDTO = await _userRepository.GetUserWithLoansByIdAsync(userId);
+            int userId = (int)HttpContext.Session.GetInt32("UserId");
+            var user = await _userRepository.GetUserByIdAsync(userId);
+            if(user.PasswordHash != HashPassword(model.OldPassword))
+            {
+                return Unauthorized(new
+                {
+                    message = "Nieprawidłowe stare hasło."
+                });
+            }
 
-            return Ok(userDTO);
+            user.PasswordHash = HashPassword(model.NewPassword);
+            try
+            {
+                await _userRepository.UpdateUserAsync(user);
+
+                return Ok(new
+                {
+                    message = "Hasło zostało zmienione."
+                });
+            }
+            catch (DbUpdateException ex)
+            {
+                return BadRequest(new
+                {
+                    message = "Wystąpił błąd przy zmianie hasła.",
+                    details = ex.Message
+                });
+            }
         }
 
-        [HttpGet("Logout")]
-        public IActionResult Logout()
+        [HttpPut("ChangeEmail")]
+        public async Task<IActionResult> ChangeEmail(ChangeEmailModel model)
         {
-            HttpContext.Session.Clear();
-            return Ok();
+            if (!ModelState.IsValid)
+            {
+                return BadRequest();
+            }
+
+            if (HttpContext.Session.GetInt32("UserId") == null)
+            {
+                return Unauthorized(new
+                {
+                    message = "Nie jesteś zalogowany."
+                });
+            }
+
+            int userId = (int)HttpContext.Session.GetInt32("UserId");
+
+            var existingEmail = await _userRepository.GetUserByEmailAsync(model.NewEmail);
+            if(existingEmail != null)
+            {
+                return BadRequest(new
+                {
+                    message = "Ten adres email jest już zajęty."
+                });
+            }
+
+            var user = await _userRepository.GetUserByIdAsync(userId);
+            if(user.PasswordHash != HashPassword(model.Password))
+            {
+                return Unauthorized(new
+                {
+                    message = "Nieprawidłowe hasło."
+                });
+            }
+
+            user.Email = model.NewEmail;
+            try
+            {
+                await _userRepository.UpdateUserAsync(user);
+
+                return Ok(new
+                {
+                    message = "Adres email został zmieniony."
+                });
+            }
+            catch(DbUpdateException ex)
+            {
+                return BadRequest(new
+                {
+                    message = "Wystąpił błąd przy zmianie adresu email.",
+                    details = ex.Message
+                });
+            }
         }
 
         private string HashPassword(string password)
