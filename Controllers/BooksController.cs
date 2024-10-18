@@ -4,6 +4,7 @@ using BookApp.Models.Entities;
 using BookApp.Models.ViewModels;
 using BookApp.Repositories.Authors;
 using BookApp.Repositories.Books;
+using BookApp.Repositories.Users;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,10 +15,12 @@ namespace BookApp.Controllers
     public class BooksController : ControllerBase
     {
         private readonly IBookRepository _bookRepository;
+        private readonly IUserRepository _userRepository;
 
-        public BooksController(IBookRepository bookRepository)
+        public BooksController(IBookRepository bookRepository, IUserRepository userRepository)
         {
             _bookRepository = bookRepository;
+            _userRepository = userRepository;
         }
 
         [HttpGet]
@@ -31,11 +34,12 @@ namespace BookApp.Controllers
         public async Task<ActionResult<BookDTO>> GetBookById(int id)
         {
             var book = await _bookRepository.GetBookById(id);
-
+            
             if (book == null)
             {
                 return NotFound();
             }
+
             return Ok(book);
         }
 
@@ -50,10 +54,15 @@ namespace BookApp.Controllers
                 });
             }
 
-            int role = (int) HttpContext.Session.GetInt32("Role");
-            if (role != (int) Role.Administrator)
+            int userId = (int)HttpContext.Session.GetInt32("UserId");
+            var user = await _userRepository.GetUserByIdAsync(userId);
+
+            if(user.Role != Role.Administrator)
             {
-                return Unauthorized();
+                return Unauthorized(new
+                {
+                    message = "Brak uprawnień."
+                });
             }
 
             var book = new Book

@@ -166,7 +166,7 @@ namespace BookApp.Controllers
             }
             catch (DbUpdateException ex)
             {
-                return BadRequest(new
+                return StatusCode(500, new
                 {
                     message = "Wystąpił błąd przy zmianie hasła.",
                     details = ex.Message
@@ -222,7 +222,7 @@ namespace BookApp.Controllers
             }
             catch(DbUpdateException ex)
             {
-                return BadRequest(new
+                return StatusCode(500, new
                 {
                     message = "Wystąpił błąd przy zmianie adresu email.",
                     details = ex.Message

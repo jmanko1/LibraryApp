@@ -21,8 +21,125 @@ namespace BookApp.Controllers
             _context = context;
         }
 
+        // Pobranie trwających wypożyczeń przez pracownika/administratora
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<LoanDTO>>> GetAllLoans()
+        {
+            if(HttpContext.Session.GetInt32("UserId") == null)
+            {
+                return Unauthorized(new
+                {
+                    message = "Brak uprawnień."
+                });
+            }
+
+            int userId = (int)HttpContext.Session.GetInt32("UserId");
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+            if(user.Role != Role.Administrator && user.Role != Role.Pracownik)
+            {
+                return Unauthorized(new
+                {
+                    message = "Brak uprawnień."
+                });
+            }
+
+            var allLoans = await _context.Loans.Select(l => new LoanDTO
+            {
+                LoanId = l.LoanId,
+                User = new LoanUserDTO
+                {
+                    UserId = l.User.UserId,
+                    Login = l.User.Login,
+                    Email = l.User.Email,
+                    FirstName = l.User.FirstName,
+                    LastName = l.User.LastName,
+                    Street = l.User.Street,
+                    City = l.User.City,
+                    Role = l.User.Role.ToString(),
+                    SignupDate = l.User.SignupDate
+                },
+                DateFrom = l.DateFrom,
+                DateTo = l.DateTo,
+                Status = l.Status.ToString(),
+                Books = l.LoanItems.Select(li => new LoanBookDTO
+                {
+                    BookId = li.BookId,
+                    Title = li.Book.Title,
+                    Author = new AuthorDTO
+                    {
+                        AuthorId = li.Book.AuthorId,
+                        FirstName = li.Book.Author.FirstName,
+                        LastName = li.Book.Author.LastName
+                    }
+                }).ToList()
+            }).ToListAsync();
+
+            var ongoingLoans = allLoans.Where(l => l.Status == LoanStatus.Trwające.ToString()).ToList();
+
+            return Ok(ongoingLoans);
+        }
+
+        // pobranie rezerwacji przez pracownika/administratora
+        [HttpGet("Reservations")]
+        public async Task<ActionResult<IEnumerable<LoanDTO>>> GetAllReservations()
+        {
+            if (HttpContext.Session.GetInt32("UserId") == null)
+            {
+                return Unauthorized(new
+                {
+                    message = "Brak uprawnień."
+                });
+            }
+
+            int userId = (int)HttpContext.Session.GetInt32("UserId");
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+            if (user.Role != Role.Administrator && user.Role != Role.Pracownik)
+            {
+                return Unauthorized(new
+                {
+                    message = "Brak uprawnień."
+                });
+            }
+
+            var allLoans = await _context.Loans.Select(l => new LoanDTO
+            {
+                LoanId = l.LoanId,
+                User = new LoanUserDTO
+                {
+                    UserId = l.User.UserId,
+                    Login = l.User.Login,
+                    Email = l.User.Email,
+                    FirstName = l.User.FirstName,
+                    LastName = l.User.LastName,
+                    Street = l.User.Street,
+                    City = l.User.City,
+                    Role = l.User.Role.ToString(),
+                    SignupDate = l.User.SignupDate
+                },
+                DateFrom = l.DateFrom,
+                DateTo = l.DateTo,
+                Status = l.Status.ToString(),
+                Books = l.LoanItems.Select(li => new LoanBookDTO
+                {
+                    BookId = li.BookId,
+                    Title = li.Book.Title,
+                    Author = new AuthorDTO
+                    {
+                        AuthorId = li.Book.AuthorId,
+                        FirstName = li.Book.Author.FirstName,
+                        LastName = li.Book.Author.LastName
+                    }
+                }).ToList()
+            }).ToListAsync();
+
+            var reservations = allLoans.Where(l => l.Status == LoanStatus.Zarezerwowane.ToString()).ToList();
+
+            return Ok(reservations);
+        }
+
+        // dodanie nowej rezerwacji
         [HttpPost]
-        public async Task<ActionResult<LoanResponseDTO>> AddLoan(LoanViewModel model)
+        public async Task<ActionResult<LoanResponseDTO>> AddReservation(LoanViewModel model)
         {
             if (!ModelState.IsValid)
             {
@@ -125,6 +242,7 @@ namespace BookApp.Controllers
             }
         }
 
+        // wydłużenie wypożyczenia o miesiąc przez wypożyczającego
         [HttpPut("{id}/Extend")]
         public async Task<ActionResult<Loan>> ExtendLoan(int id)
         {
@@ -204,6 +322,7 @@ namespace BookApp.Controllers
             return Ok(new { message = $"Wypożyczenie zostało wydłużone do '{loan.DateTo}'" });
         }
 
+        // anulowanie wszystkich przestarzałych rezerwacji przez pracownika/administratora
         [HttpPut("CancelExpiredReservations")]
         public async Task<ActionResult<Loan>> CancelExpiredReservations()
         {
@@ -255,12 +374,13 @@ namespace BookApp.Controllers
                 await transaction.RollbackAsync();
                 return StatusCode(500, new
                 {
-                    message = "Wystąpił błąd podczas anulowania rezerwacji.",
+                    message = "Wystąpił błąd podczas anulowania przestarzałych rezerwacji.",
                     details = ex.Message
                 });
             }
         }
 
+        // anulowanie rezerwacji przez rezerwującego
         [HttpPut("{id}/CancelReservation")]
         public async Task<ActionResult<Loan>> CancelReservation(int id)
         {
@@ -287,7 +407,7 @@ namespace BookApp.Controllers
 
             if(loan.Status != LoanStatus.Zarezerwowane)
             {
-                return BadRequest(new {message = "Tylko rezerwacje mogą zostać anulowane."});
+                return BadRequest(new {message = "Tylko rezerwacje mogą być anulowane."});
             }
 
             loan.Status = LoanStatus.Anulowane;
@@ -301,7 +421,107 @@ namespace BookApp.Controllers
                 return StatusCode(500, new { message = "Wystąpił błąd", details = ex.Message });
             }
 
-            return Ok(new { message = "Rezerwacja została anulowana" });
+            return Ok(new { message = "Rezerwacja została anulowana." });
+        }
+
+        // rozpoczęcie wypożyczenia przez pracownika/administratora
+        [HttpPut("{id}/Start")]
+        public async Task<ActionResult<Loan>> StartLoan(int id)
+        {
+            if (HttpContext.Session.GetInt32("UserId") == null)
+            {
+                return Unauthorized(new
+                {
+                    message = "Brak uprawnień."
+                });
+            }
+
+            var userId = (int)HttpContext.Session.GetInt32("UserId");
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+            if (user.Role != Role.Pracownik && user.Role != Role.Administrator)
+            {
+                return Unauthorized(new
+                {
+                    message = "Brak uprawnień."
+                });
+            }
+
+            var loan = await _context.Loans.FirstOrDefaultAsync(l => l.LoanId == id);
+            if (loan == null)
+            {
+                return NotFound(new { message = $"Wypożyczenie o ID {id} nie zostało znalezione." });
+            }
+
+            if (loan.Status != LoanStatus.Zarezerwowane)
+            {
+                return BadRequest(new
+                {
+                    message = "Oznaczyć jako trwające wypożyczenie można jedynie rezerwację."
+                });
+            }
+
+            loan.Status = LoanStatus.Trwające;
+            try
+            {
+                _context.Loans.Update(loan);
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex)
+            {
+                return StatusCode(500, new { message = "Wystąpił błąd", details = ex.Message });
+            }
+
+            return Ok(new { message = "Wypożyczenie zostało rozpoczęte." });
+        }
+
+        // zakończenie wypożyczenia przez pracownika/administratora
+        [HttpPut("{id}/Finish")]
+        public async Task<ActionResult<Loan>> FinishLoan(int id)
+        {
+            if (HttpContext.Session.GetInt32("UserId") == null)
+            {
+                return Unauthorized(new
+                {
+                    message = "Brak uprawnień."
+                });
+            }
+
+            var userId = (int)HttpContext.Session.GetInt32("UserId");
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+            if (user.Role != Role.Pracownik && user.Role != Role.Administrator)
+            {
+                return Unauthorized(new
+                {
+                    message = "Brak uprawnień."
+                });
+            }
+
+            var loan = await _context.Loans.FirstOrDefaultAsync(l => l.LoanId == id);
+            if (loan == null)
+            {
+                return NotFound(new { message = $"Wypożyczenie o ID {id} nie zostało znalezione." });
+            }
+
+            if (loan.Status != LoanStatus.Trwające)
+            {
+                return BadRequest(new
+                {
+                    message = "Zakończyć można jedynie trwające wypożyczenie."
+                });
+            }
+
+            loan.Status = LoanStatus.Zakończone;
+            try
+            {
+                _context.Loans.Update(loan);
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex)
+            {
+                return StatusCode(500, new { message = "Wystąpił błąd", details = ex.Message });
+            }
+
+            return Ok(new { message = "Wypożyczenie zostało zakończone." });
         }
     }
 }
